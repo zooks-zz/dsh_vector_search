@@ -45,7 +45,7 @@ CREATE TABLE source_payloads (
 );
 ```
 
-- **向量**：BLOB，float32 小端，长度 = `dimensions` × 4；写入时 L2 归一化；维度与 `dimensions` 不符即拒绝。
+- **向量**：BLOB，float32 小端，长度 = `dimensions` × 4；写入时 L2 归一化；维度与 `dimensions` 不符、或范数为 0 / 含 NaN → 拒绝。
 - **payload**：TEXT（JSON 字符串），写入时校验合法 JSON；opaque，内容与大小由调用方决定，插件不解读。
 - **删除 source** = 同一事务内 `DELETE` 两表对应行（级联）。
 - 无 `apps` 表、无 `sources` 表、无 `tags` 表。
@@ -53,7 +53,7 @@ CREATE TABLE source_payloads (
 ## 4. 存储与向量计算
 
 - **持久层**：`node:sqlite`（Node 内置，无原生依赖）。全局共享一个 DB 文件，默认 `$DSH_HOME/dsh-vector-search/store.db`（跨 profile、跨项目），可由 `db_path` 配置覆盖。
-- **向量召回**：**纯 JS 余弦相似度**。实现为内存索引（启动载入、写后刷新）或按需读取，二者对外等价。**不使用** SQLite 向量扩展（vec0）、不做 ANN——本地知识库量级（万级 1024 维）在数十毫秒内。
+- **向量召回**：**纯 JS 余弦相似度**。每次 search 从 SQLite 现读该 app 的全部 `(entry, vector)`、解码为 Float32Array 后与 query 向量做余弦；**不维护内存缓存**（跨 profile 共享库时避免缓存陈旧，且更简单）。**不使用** SQLite 向量扩展（vec0）、不做 ANN——本地知识库量级（万级 1024 维）在数十毫秒内。检索是**语义检索**（向量余弦），不是对 entry 文本的 SQL 关键词匹配。
 - **写并发**：单连接 + 写队列，一个写操作完整结束再开始下一个；「embed → 写库」在同一逻辑单元内原子完成。
 
 ## 5. 接口
@@ -80,15 +80,15 @@ search(app, query, limit?, top_k?)     → SearchResult[]
 
 ### 5.3 写接口语义
 
-- `add`：`(app, source)` 已存在 → 报错。`entries` 非空、每项非空。逐条生成向量，**全部成功后一次性写入**；任一条 embedding 失败 → 整次拒绝、不写入任何数据。`payload` 可选。
+- `add`：`(app, source)` 已存在 → 报错。`entries` 非空、每项 trim 后非空。逐条生成向量，**全部成功后一次性写入**；任一条 embedding 失败 → 整次拒绝、不写入任何数据。`payload` 可选。
 - `update`：`(app, source)` 不存在 → 报错。**全量替换**——用新的 `entries` 替换旧的、重嵌全部 entry。`payload` 缺省 = **清空**；给值 = 覆盖。
 - `remove`：级联删除两表；`(app, source)` 不存在 → **幂等成功（无操作）**，不报错。
 
 ### 5.4 search 流程
 
-1. 校验：`query` 为空 → 返回**空列表**（不报错）；`app` 下无任何 entry（空语料）→ **报错「库为空」**。
+1. 校验：`query` trim 后为空 → 返回**空列表**（不报错）；`app` 下无任何 entry（空语料）→ **报错「库为空」**。
 2. 生成 query 向量（embedding）。
-3. 在 `app` 范围内做余弦相似度，取 Top-`top_k`（默认 30）。
+3. 从 SQLite 现读 `app` 范围内全部 `(entry, vector)`，与 query 向量做余弦相似度，取 Top-`top_k`（默认 30）。
 4. 把 Top-`top_k` 条 entry 交给 reranker 精排，得 rerank 分数。
 5. 按 rerank_score 降序，**按 source 去重、只留最高分那条 entry**，向下递补凑到 `limit`（默认 10）条，凑不够就返回更少。
 6. 返回 `SearchResult[]`。
@@ -126,8 +126,14 @@ interface SearchResult {
 | `result_limit` | `10` | 可被 `search(limit)` 覆盖 |
 | `db_path` | `$DSH_HOME/dsh-vector-search/store.db` | 可覆盖 |
 
-- **API key 不在此表**：存 `credentials` 服务（`inject: ['credentials']`）。
+- **API key 不在此表**：存 `credentials` 服务，通过 `authorization` 流一次性配置（见 7.1）。
 - 校验常量（非配置，硬编码）：`app` / `source` / `entry` 长度上限（建议值：app ≤ 64、source ≤ 512、entry ≤ 512，具体实现时定）。
+
+### 7.1 API key 配置（DSH 常规做法）
+
+- **读取**：`credentials.readRecord(key)` → `{ kind: 'api-key', key }`。
+- **一次性配置**：插件 `inject: ['authorization', 'credentials']`，apply 里 `authorization.registerFlow(...)` 注册「粘贴 API Key」流；首次需要 key 而缺失时 `authorization.begin({ key, ... })`，harness 弹交互、用户粘贴、流内 `commit({ kind: 'api-key', key })` 落库。
+- **不**写 config、不写环境变量、不把 key 当工具参数（避免进聊天历史）。
 
 ## 8. 错误码
 
@@ -157,4 +163,4 @@ interface SearchResult {
 
 ## 11. 非目标（v1 明确不做）
 
-batch 批量嵌入、并发嵌入、embedding 缓存、tag 机制、ANN、min_score 阈值、vector_score 返回、stats、list、空 source、`get(source)` 只读、app 注册表、独立对外 HTTP 服务。详见 [决策记录](decisions.md)。
+batch 批量嵌入、并发嵌入、embedding 缓存（text→vector）、内存向量缓存、tag 机制、ANN、min_score 阈值、vector_score 返回、stats、list、空 source、`get(source)` 只读、app 注册表、独立对外 HTTP 服务。详见 [决策记录](decisions.md)。
