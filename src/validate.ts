@@ -1,4 +1,4 @@
-// 输入校验：app / source / entry。纯函数，抛中文错误信息。
+// 输入校验与合法化：app / source / entry / min_score。纯函数，抛中文错误信息。
 
 export const LIMITS = Object.freeze({ app: 64, source: 512, entry: 512 });
 
@@ -25,4 +25,10 @@ export function normalizeEntries(entries: unknown): string[] {
     list.push(t);
   }
   return list;
+}
+
+// min_score 合法化：数字则 clamp 到 [0,1]；非数字 / NaN / Infinity 回退到 fallback（配置值）。
+export function normalizeMinScore(value: unknown, fallback: number): number {
+  const n = typeof value === "number" && Number.isFinite(value) ? value : fallback;
+  return Math.min(1, Math.max(0, n));
 }

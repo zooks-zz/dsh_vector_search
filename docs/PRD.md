@@ -64,7 +64,7 @@ CREATE TABLE source_payloads (
 set(app, source, entries, payload?)    → { app, source }
 get(app, source)                       → SourceRecord | null
 delete(app, source)                    → { app, source }
-search(app, query, limit?, top_k?)     → SearchResult[]
+search(app, query, limit?, min_score?, top_k?)  → SearchResult[]
 ```
 
 ### 5.2 Agent 工具（Service 的薄封装）
@@ -76,7 +76,7 @@ search(app, query, limit?, top_k?)     → SearchResult[]
 | `vs_set` | `app, source, entries[], payload?` | 写入 source（upsert：不存在新建、存在全量替换） |
 | `vs_get` | `app, source` | 读取 source 完整记录（entries + payload）；不存在返回 null |
 | `vs_delete` | `app, source` | 删除 source（级联两表；幂等） |
-| `vs_search` | `app, query, limit?, top_k?` | 语义检索 |
+| `vs_search` | `app, query, limit?, min_score?, top_k?` | 语义检索（低于 min_score 的命中被过滤） |
 
 ### 5.3 写接口语义
 
@@ -90,7 +90,7 @@ search(app, query, limit?, top_k?)     → SearchResult[]
 2. 生成 query 向量（embedding）。
 3. 从 SQLite 现读 `app` 范围内全部 `(entry, vector)`，与 query 向量做余弦相似度，取 Top-`top_k`（默认 30）。
 4. 把 Top-`top_k` 条 entry 交给 reranker 精排，得 rerank 分数。
-5. 按 rerank_score 降序，**按 source 去重、只留最高分那条 entry**，向下递补凑到 `limit`（默认 10）条，凑不够就返回更少。
+5. 按 rerank_score 降序，**过滤掉 `rerank_score < min_score` 的命中**（`min_score` 缺省走配置 0.5，接口可覆盖，取值 clamp 到 [0,1]），再**按 source 去重、只留最高分那条 entry**，向下递补凑到 `limit`（默认 10）条，凑不够就返回更少。
 6. 返回 `SearchResult[]`。
 
 ### 5.5 SearchResult
@@ -137,6 +137,7 @@ interface SourceRecord {
 | `dimensions` | `1024` | 按接口文档设，写入时校验向量长度 |
 | `recall_top_k` | `30` | 可被 `search(top_k)` 覆盖 |
 | `result_limit` | `10` | 可被 `search(limit)` 覆盖 |
+| `min_score` | `0.5` | rerank 分数阈值；可被 `search(min_score)` 覆盖，取值 clamp 到 [0,1] |
 
 - **API key 不在此表**：存 `credentials` 的 ref（`siliconflow_api_key`），手动编辑 `$DSH_HOME/.credentials.yaml`（见 7.1）。
 - **DB 位置**：固定 `$DSH_HOME/dsh-vector-search/store.db`（不在 config 中）。
@@ -181,4 +182,4 @@ interface SourceRecord {
 
 ## 11. 非目标（v1 明确不做）
 
-batch 批量嵌入、并发嵌入、embedding 缓存（text→vector）、内存向量缓存、tag 机制、ANN、min_score 阈值、vector_score 返回、stats、list、空 source、app 注册表、独立对外 HTTP 服务。详见 [决策记录](decisions.md)。
+batch 批量嵌入、并发嵌入、embedding 缓存（text→vector）、内存向量缓存、tag 机制、ANN、vector_score 返回、stats、list、空 source、app 注册表、独立对外 HTTP 服务。详见 [决策记录](decisions.md)。

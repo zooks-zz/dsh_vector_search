@@ -11,6 +11,7 @@ const cfg: VectorSearchConfig = {
   dimensions: 3,
   recall_top_k: 30,
   result_limit: 10,
+  min_score: 0.5,
 };
 
 type MockBody = { ok: boolean; status?: number; json(): Promise<unknown> };

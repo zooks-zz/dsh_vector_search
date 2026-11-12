@@ -1,5 +1,5 @@
 import { l2normalize, dot } from "./vector.js";
-import { assertApp, assertSource, normalizeEntries } from "./validate.js";
+import { assertApp, assertSource, normalizeEntries, normalizeMinScore } from "./validate.js";
 import type { VectorSearchConfig } from "./config.js";
 import type { Storage } from "./storage.js";
 
@@ -17,7 +17,7 @@ export interface Embedder {
 }
 
 // 业务层只需要这两个搜索参数，不关心 embedding 的外部配置。
-export type ServiceConfig = Pick<VectorSearchConfig, "recall_top_k" | "result_limit">;
+export type ServiceConfig = Pick<VectorSearchConfig, "recall_top_k" | "result_limit" | "min_score">;
 
 // 业务逻辑：set / get / delete / search 的编排。storage 与 embedding 均注入，便于单测 mock。
 export class VectorSearchService {
@@ -93,7 +93,7 @@ export class VectorSearchService {
     return { app, source };
   }
 
-  async search(appRaw: unknown, query: unknown, limit?: unknown, topK?: unknown): Promise<{ results: SearchResult[] }> {
+  async search(appRaw: unknown, query: unknown, limit?: unknown, minScore?: unknown, topK?: unknown): Promise<{ results: SearchResult[] }> {
     const app = assertApp(appRaw);
     const q = typeof query === "string" ? query.trim() : "";
     if (q.length === 0) return { results: [] };
@@ -110,10 +110,12 @@ export class VectorSearchService {
       .map((c, i) => ({ ...c, rerank: rerankScores[i] }))
       .sort((a, b) => b.rerank - a.rerank);
     const cap = typeof limit === "number" ? limit : this.cfg.result_limit;
+    const threshold = normalizeMinScore(minScore, this.cfg.min_score);
     const seen = new Set<string>();
     const results: SearchResult[] = [];
     for (const c of combined) {
       if (seen.has(c.source)) continue;
+      if (c.rerank < threshold) break; // combined 已按 rerank 降序，一旦低于阈值即可停止
       seen.add(c.source);
       const item: SearchResult = { source: c.source, entry: c.entry, rerank_score: c.rerank };
       const p = this.storage.getPayload(app, c.source);

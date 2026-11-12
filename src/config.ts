@@ -10,6 +10,7 @@ export interface VectorSearchConfig {
   dimensions: number;
   recall_top_k: number;
   result_limit: number;
+  min_score: number;
 }
 
 // 默认配置值：喂给 index.ts 的 schemastery Config schema 作 .default()。
@@ -21,6 +22,7 @@ export const DEFAULTS: Readonly<VectorSearchConfig> = Object.freeze({
   dimensions: 1024,
   recall_top_k: 30,
   result_limit: 10,
+  min_score: 0.5,
 });
 
 // 运行时数据目录（DB）。跨 profile、跨项目共享。

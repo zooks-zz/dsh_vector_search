@@ -14,6 +14,7 @@
 - **撤销**：此前否决的 `get(source)` 只读，本次改为采纳（set 合并 add/update 后，精确取回与模糊检索互补，价值成立）。
 - **检索**：embed → 余弦 Top-k → rerank → 按 source 去重留最高分 → 递补到 limit（凑不够就返回更少）。
 - **结果**：`{source, entry, payload, rerank_score}`，score ∈ [0,1]，只返回 rerank 分数。
+- **min_score 阈值**：配置缺省 `0.5`；search 过滤 `rerank_score < min_score` 的命中；接口可选 `min_score`（取值 clamp 到 [0,1]，缺省走配置）。过滤发生在 source 去重同一循环内、`limit` 截断之前。
 - **失败即报错**：外部服务挂 → 整体报错并指明环节；空语料报错；空 query（trim 后）返回空列表。
 - **输入校验**：`query` / `entry` 先 trim 再判空（纯空白视作空）。
 - **外部服务**：embedding / rerank 地址独立配置（互不依赖，可单独迁移）。
@@ -23,7 +24,7 @@
 ## ✅ 已定（实现）
 
 - **实现语言**：TypeScript（`src/` → tsc 编译到 `lib/`，含 `.d.ts`）。
-- **配置走 schemastery（正统）**：`export const Config = z.object({...})`，字段带 `.default()`；由设置界面 + config-editor 管理。字段 7 个：`embedding_base_url` / `rerank_base_url` / `embedding_model` / `rerank_model` / `dimensions` / `recall_top_k` / `result_limit`（**无 db_path、无 api_key**）。
+- **配置走 schemastery（正统）**：`export const Config = z.object({...})`，字段带 `.default()`；由设置界面 + config-editor 管理。字段 8 个：`embedding_base_url` / `rerank_base_url` / `embedding_model` / `rerank_model` / `dimensions` / `recall_top_k` / `result_limit` / `min_score`（**无 db_path、无 api_key**）。
 - **API key 走 credentials ref + YAML 手动配置**：存 `credentials` 的 ref `siliconflow_api_key`；读取用 `credentials.resolve(ref)`；配置方式**仅**手动编辑 `$DSH_HOME/.credentials.yaml`。不写 config、不写环境变量、不把 key 当工具参数（避免 key 进会话）。
 - **import DSH 自己的包是正当的**：schemastery 是 DSH 框架本体，import 理所应当；靠声明依赖解决 asar 解析（schemastery 的传递依赖 cosmokit / @standard-schema/spec 也需显式声明，因 pnpm 隔离布局 + Windows junction 解析问题）。
 - **代码布局**：`src/` 按功能切分——`config.ts` / `vector.ts` / `validate.ts` / `storage.ts` / `embedding.ts` / `service.ts`（业务逻辑 + 结果格式化）/ `register.ts`（工具注册）/ `types.ts`（DSH 边界类型）。入口 `index.ts`（Config + apply + inject）。
@@ -56,7 +57,6 @@
 | batch / 并发嵌入 | 首轮建库达数万条、顺序耗时不可接受时 |
 | embedding 缓存（text→vector，跳过重复嵌入） | 高频全量重嵌且成本 / 时间变得不可忽略时 |
 | ANN（sqlite-vec vec0） | 语料达十万级以上、brute-force 召回变慢时 |
-| min_score 阈值 | 实际运行积累召回质量数据后 |
 | 结果返回 vector_score（调试） | 需要排查召回质量时 |
 | app 注册表 / 碰撞检测 | 插件被广泛分发、命名碰撞真实发生时 |
 | 结果分组展示「全部命中 entry」 | 消费方明确需要看到多情境命中时 |

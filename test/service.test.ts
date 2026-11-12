@@ -20,10 +20,10 @@ function makeEmbedding(): Embedder {
   };
 }
 
-function setup(): { svc: VectorSearchService; storage: Storage; dir: string } {
+function setup(overrides: Partial<{ recall_top_k: number; result_limit: number; min_score: number }> = {}): { svc: VectorSearchService; storage: Storage; dir: string } {
   const dir = mkdtempSync(join(tmpdir(), "vsvc-"));
   const storage = new Storage(join(dir, "store.db"));
-  const svc = new VectorSearchService(storage, makeEmbedding(), { recall_top_k: 30, result_limit: 10 });
+  const svc = new VectorSearchService(storage, makeEmbedding(), { recall_top_k: 30, result_limit: 10, min_score: 0.5, ...overrides });
   return { svc, storage, dir };
 }
 
@@ -104,8 +104,48 @@ test("search 按 source 去重、只留最高 rerank 分", async () => {
 test("search 结果受 limit 约束", async () => {
   const { svc, storage, dir } = setup();
   for (let i = 0; i < 5; i++) await svc.set("app", `s${i}`, [`入口${i}`]);
-  const { results } = await svc.search("app", "查询词", 3);
+  const { results } = await svc.search("app", "查询词", 3, 0); // min_score=0 避免过滤干扰
   assert.equal(results.length, 3);
+  storage.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("search 按 min_score 过滤低分结果", async () => {
+  const { svc, storage, dir } = setup();
+  for (let i = 0; i < 5; i++) await svc.set("app", `s${i}`, [`入口${i}`]);
+  // mock rerank 5 条 = [1, .8, .6, .4, .2]，阈值 0.5 → 只留前 3
+  const { results } = await svc.search("app", "查询词", undefined, 0.5);
+  assert.equal(results.length, 3);
+  assert.ok(results.every((r) => r.rerank_score >= 0.5));
+  storage.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("search 不传 min_score 走配置", async () => {
+  const { svc, storage, dir } = setup({ min_score: 0.7 });
+  for (let i = 0; i < 5; i++) await svc.set("app", `s${i}`, [`入口${i}`]);
+  const { results } = await svc.search("app", "查询词");
+  assert.equal(results.length, 2); // 1.0、0.8 通过 0.7
+  storage.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("search min_score 越界自动 clamp 到 [0,1]", async () => {
+  const { svc, storage, dir } = setup();
+  for (let i = 0; i < 5; i++) await svc.set("app", `s${i}`, [`入口${i}`]);
+  const high = await svc.search("app", "查询词", undefined, 1.5); // clamp → 1，只留 1.0
+  assert.equal(high.results.length, 1);
+  const low = await svc.search("app", "查询词", undefined, -1); // clamp → 0，全留
+  assert.equal(low.results.length, 5);
+  storage.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("search min_score 非数字走配置", async () => {
+  const { svc, storage, dir } = setup(); // 配置 0.5
+  for (let i = 0; i < 5; i++) await svc.set("app", `s${i}`, [`入口${i}`]);
+  const { results } = await svc.search("app", "查询词", undefined, "oops");
+  assert.equal(results.length, 3); // 回退配置 0.5 → 1.0/0.8/0.6
   storage.close();
   rmSync(dir, { recursive: true, force: true });
 });

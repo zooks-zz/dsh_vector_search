@@ -7,6 +7,7 @@ test("DEFAULTS 含全部字段且值合理", () => {
     "dimensions",
     "embedding_base_url",
     "embedding_model",
+    "min_score",
     "recall_top_k",
     "rerank_base_url",
     "rerank_model",
@@ -15,6 +16,7 @@ test("DEFAULTS 含全部字段且值合理", () => {
   assert.equal(DEFAULTS.dimensions, 1024);
   assert.equal(DEFAULTS.recall_top_k, 30);
   assert.equal(DEFAULTS.result_limit, 10);
+  assert.equal(DEFAULTS.min_score, 0.5);
   assert.ok(DEFAULTS.embedding_model.includes("Qwen"));
 });
 

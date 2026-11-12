@@ -103,13 +103,14 @@ export function registerTools(ctx: DshContext, service: VectorSearchService): vo
   ctx.tools.register({
     name: "vs_search",
     description:
-      "在 app 内按 query 语义检索，返回相关 source（去重后按 rerank 分数降序）。空 query 返回空结果；库为空报错。",
+      "在 app 内按 query 语义检索，返回相关 source（去重后按 rerank 分数降序）。rerank_score 低于 min_score 的命中被过滤；空 query 返回空结果；库为空报错。",
     parameters: {
       type: "object",
       properties: {
         app: { type: "string", description: "应用命名空间" },
         query: { type: "string", description: "自然语言查询" },
         limit: { type: "integer", description: "返回条数（默认 10）" },
+        min_score: { type: "number", description: "rerank 分数阈值 [0,1]，低于该值的命中被过滤（默认走配置 0.5）" },
         top_k: { type: "integer", description: "向量召回条数（默认 30）" },
       },
       required: ["app", "query"],
@@ -137,7 +138,7 @@ export function registerTools(ctx: DshContext, service: VectorSearchService): vo
       render: (_a, v) => text(formatSearchResults((v as { results: Parameters<typeof formatSearchResults>[0] }).results)),
     },
     async execute(args) {
-      return service.search(args.app, args.query, args.limit, args.top_k);
+      return service.search(args.app, args.query, args.limit, args.min_score, args.top_k);
     },
   });
 }

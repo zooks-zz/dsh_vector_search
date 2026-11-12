@@ -16,6 +16,7 @@ export const Config = z.object({
   dimensions: z.number().default(DEFAULTS.dimensions),
   recall_top_k: z.number().default(DEFAULTS.recall_top_k),
   result_limit: z.number().default(DEFAULTS.result_limit),
+  min_score: z.number().default(DEFAULTS.min_score),
 });
 
 // 入口：把各模块接起来。config 是 schemastery 解析后的普通对象。

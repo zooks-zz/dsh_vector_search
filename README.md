@@ -24,7 +24,7 @@ DSH 宿主插件：**通用语义检索存储**。
 ```bash
 pnpm install   # 装依赖
 pnpm build     # tsc 编译 src/ → lib/
-pnpm test      # node --test 跑 test/ 下的 TS 用例（36 个）
+pnpm test      # node --test 跑 test/ 下的 TS 用例（42 个）
 ```
 
 > `lib/` 是编译产物，已 gitignore；clone 后需先 `pnpm build`，插件才能加载。
@@ -54,6 +54,7 @@ refs:
 | `dimensions` | `1024` | 向量维度 |
 | `recall_top_k` | `30` | 向量召回条数 |
 | `result_limit` | `10` | 精排后返回条数 |
+| `min_score` | `0.5` | rerank 分数阈值，低于该值的命中被过滤（可被 `search(min_score)` 覆盖，取值截断到 [0,1]） |
 
 DB 位置固定 `$DSH_HOME/dsh-vector-search/store.db`，不开放配置。
 
@@ -93,14 +94,14 @@ DB 位置固定 `$DSH_HOME/dsh-vector-search/store.db`，不开放配置。
 | `vs_set(app, source, entries[], payload?)` | 写入 source（upsert：不存在新建、存在全量替换；payload 缺省清空） |
 | `vs_get(app, source)` | 读取 source 完整记录（entries + payload）；不存在返回 null |
 | `vs_delete(app, source)` | 删除 source（级联；不存在幂等成功） |
-| `vs_search(app, query, limit?, top_k?)` | 语义检索（去重后按 rerank 分降序） |
+| `vs_search(app, query, limit?, min_score?, top_k?)` | 语义检索（低于 min_score 的命中被过滤，去重后按 rerank 分降序） |
 
 ## 目录结构
 
 ```
 src/     TS 源码（config / vector / validate / storage / embedding / service / register / types + index）
 lib/     tsc 编译产物（.js + .d.ts，插件入口；gitignored）
-test/    TS 单测（36 用例，mock 外部依赖）
+test/    TS 单测（42 用例，mock 外部依赖）
 docs/    PRD + 决策记录
 locale/  中英文标题描述
 ```
