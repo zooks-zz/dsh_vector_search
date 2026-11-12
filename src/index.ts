@@ -24,7 +24,7 @@ export function apply(ctx: DshContext, config: VectorSearchConfig): void {
 
   const storage = new Storage(dbPath);
   const embedding = new EmbeddingClient(config, async () => {
-    // API key 存 credentials 的 ref（siliconflow_api_key），由 vs_configure 工具设置。
+    // API key 存 credentials 的 ref（siliconflow_api_key），读取用 credentials.resolve。
     const resolved = await ctx.credentials.resolve(API_KEY_REF);
     if (resolved && typeof resolved.value === "string" && resolved.value.trim().length > 0) {
       return resolved.value;

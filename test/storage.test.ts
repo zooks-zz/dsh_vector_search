@@ -76,3 +76,18 @@ test("loadEntries 按 app 隔离", () => {
   storage.close();
   rmSync(dir, { recursive: true, force: true });
 });
+
+test("listSourceEntries 只取该 source 的 entry 且按 id 顺序", () => {
+  const { storage, dir } = makeStorage();
+  const v = new Float32Array([1]);
+  storage.transaction(() => {
+    storage.insertEntry("app", "s1", "一", v);
+    storage.insertEntry("app", "s1", "二", v);
+    storage.insertEntry("app", "s2", "三", v);
+  });
+  assert.deepEqual(storage.listSourceEntries("app", "s1"), ["一", "二"]);
+  assert.deepEqual(storage.listSourceEntries("app", "s2"), ["三"]);
+  assert.deepEqual(storage.listSourceEntries("app", "none"), []);
+  storage.close();
+  rmSync(dir, { recursive: true, force: true });
+});

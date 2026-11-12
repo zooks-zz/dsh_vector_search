@@ -9,8 +9,9 @@
 - **存储**：`node:sqlite`（Node 内置，无原生依赖）；向量存 BLOB(float32)、写入时 L2 归一化。
 - **DB 位置**：全局共享 `$DSH_HOME/dsh-vector-search/store.db`（跨 profile、跨项目）。用户已将 `$DSH_HOME` 设为系统变量、指向独立目录。
 - **向量召回**：纯 JS 余弦相似度；每次 search 从 SQLite 现读该 app 的向量，**不维护内存缓存**；不用 SQLite 向量扩展、不做 ANN。
-- **接口**：`add / update / remove / search` 四操作，全部显式带 `app`（不自动识别调用方身份）。
-- **语义**：`add` 重复 source → 报错；`update` 全量替换、payload 缺省 = 清空；`remove` 级联删两表、不存在则幂等成功。
+- **接口**：`set / get / delete / search` 四操作，全部显式带 `app`（不自动识别调用方身份）。`set` 合并原 add/update 为幂等 upsert；`get` 按 source 精确取回；`delete` 即原 remove。
+- **语义**：`set` 不存在→新建、存在→全量替换（payload 缺省 = 清空、给值 = 覆盖）；`get` 不存在→返回 `null`（幂等，不报错）；`delete` 级联删两表、不存在则幂等成功。
+- **撤销**：此前否决的 `get(source)` 只读，本次改为采纳（set 合并 add/update 后，精确取回与模糊检索互补，价值成立）。
 - **检索**：embed → 余弦 Top-k → rerank → 按 source 去重留最高分 → 递补到 limit（凑不够就返回更少）。
 - **结果**：`{source, entry, payload, rerank_score}`，score ∈ [0,1]，只返回 rerank 分数。
 - **失败即报错**：外部服务挂 → 整体报错并指明环节；空语料报错；空 query（trim 后）返回空列表。
@@ -26,7 +27,8 @@
 - **API key 走 credentials ref + YAML 手动配置**：存 `credentials` 的 ref `siliconflow_api_key`；读取用 `credentials.resolve(ref)`；配置方式**仅**手动编辑 `$DSH_HOME/.credentials.yaml`。不写 config、不写环境变量、不把 key 当工具参数（避免 key 进会话）。
 - **import DSH 自己的包是正当的**：schemastery 是 DSH 框架本体，import 理所应当；靠声明依赖解决 asar 解析（schemastery 的传递依赖 cosmokit / @standard-schema/spec 也需显式声明，因 pnpm 隔离布局 + Windows junction 解析问题）。
 - **代码布局**：`src/` 按功能切分——`config.ts` / `vector.ts` / `validate.ts` / `storage.ts` / `embedding.ts` / `service.ts`（业务逻辑 + 结果格式化）/ `register.ts`（工具注册）/ `types.ts`（DSH 边界类型）。入口 `index.ts`（Config + apply + inject）。
-- **工具命名**：前缀 `vs_`，四个工具 `vs_add / vs_update / vs_remove / vs_search`。
+- **工具命名**：前缀 `vs_`，四个工具 `vs_set / vs_get / vs_delete / vs_search`。
+- **工具 output.schema 约束（宿主实测，见官方 dsh-tools）**：DSH 工具 schema 是受限 JSON Schema 子集——`type` 只能是单个字符串（`object/array/string/number/integer/boolean/null`），**不支持 type 数组**；组合只能 `oneOf`（≥2 分支、恰好命中一支），`oneOf` 节点上不能再写 `type`。可空输出（object | null）用 `oneOf: [{ type: "object", ... }, { type: "null" }]` 声明。
 - **单元测试**：`test/` 目录 TS 单测 + Node 内置 `node:test`（Node 24 原生类型剥离，**无需 tsx**）；mock 外部依赖（`Embedder` 接口 + 注入 mock fetch）；命令 `node --test --test-isolation=none`。
 
 ## ❌ 否决（决定不做，附理由）
@@ -38,7 +40,6 @@
 | `stats` 工具 | 非核心职责 |
 | `list`（sources / apps） | 非核心职责 |
 | 空 source / 独立「建 app」操作 | 无意义 |
-| `get(source)` 只读 | 非核心职责；add 已对重复报错 |
 | 自动识别调用方身份 | fiber 异步不可靠、隐式难调试、agent 直调无解 |
 | payload 放正文 / 全文 | 附加能力不替代原系统，插件不管 payload 内容 |
 | API key 写 config / 环境变量 | 应走 credentials ref |

@@ -19,7 +19,7 @@ export interface Embedder {
 // 业务层只需要这两个搜索参数，不关心 embedding 的外部配置。
 export type ServiceConfig = Pick<VectorSearchConfig, "recall_top_k" | "result_limit">;
 
-// 业务逻辑：add / update / remove / search 的编排。storage 与 embedding 均注入，便于单测 mock。
+// 业务逻辑：set / get / delete / search 的编排。storage 与 embedding 均注入，便于单测 mock。
 export class VectorSearchService {
   private _writeChain: Promise<void> = Promise.resolve();
 
@@ -44,11 +44,12 @@ export class VectorSearchService {
     return l2normalize(await this.embedding.embed(text));
   }
 
-  add(app: unknown, source: unknown, entries: unknown, payload: unknown): Promise<{ app: string; source: string }> {
-    return this.lock(() => this.addLocked(app, source, entries, payload));
+  // set = 幂等 upsert：source 不存在则新建、存在则全量替换（entries + payload）。
+  set(app: unknown, source: unknown, entries: unknown, payload: unknown): Promise<{ app: string; source: string }> {
+    return this.lock(() => this.setLocked(app, source, entries, payload));
   }
 
-  private async addLocked(
+  private async setLocked(
     appRaw: unknown,
     sourceRaw: unknown,
     entries: unknown,
@@ -57,30 +58,6 @@ export class VectorSearchService {
     const app = assertApp(appRaw);
     const source = assertSource(sourceRaw);
     const list = normalizeEntries(entries);
-    if (this.storage.sourceExists(app, source)) throw new Error("source 已存在");
-    const vectors: Float32Array[] = [];
-    for (const entry of list) vectors.push(await this.embedNormalized(entry));
-    this.storage.transaction(() => {
-      for (let i = 0; i < list.length; i++) this.storage.insertEntry(app, source, list[i], vectors[i]);
-      if (payload !== undefined && payload !== null) this.storage.upsertPayload(app, source, payload);
-    });
-    return { app, source };
-  }
-
-  update(app: unknown, source: unknown, entries: unknown, payload: unknown): Promise<{ app: string; source: string }> {
-    return this.lock(() => this.updateLocked(app, source, entries, payload));
-  }
-
-  private async updateLocked(
-    appRaw: unknown,
-    sourceRaw: unknown,
-    entries: unknown,
-    payload: unknown,
-  ): Promise<{ app: string; source: string }> {
-    const app = assertApp(appRaw);
-    const source = assertSource(sourceRaw);
-    const list = normalizeEntries(entries);
-    if (!this.storage.sourceExists(app, source)) throw new Error("source 不存在");
     const vectors: Float32Array[] = [];
     for (const entry of list) vectors.push(await this.embedNormalized(entry));
     this.storage.transaction(() => {
@@ -92,11 +69,21 @@ export class VectorSearchService {
     return { app, source };
   }
 
-  remove(app: unknown, source: unknown): Promise<{ app: string; source: string }> {
-    return this.lock(() => this.removeLocked(app, source));
+  // get = 按 source 精确取回完整记录；不存在返回 null（幂等，不报错）。
+  get(appRaw: unknown, sourceRaw: unknown): { app: string; source: string; entries: string[]; payload: unknown } | null {
+    const app = assertApp(appRaw);
+    const source = assertSource(sourceRaw);
+    if (!this.storage.sourceExists(app, source)) return null;
+    const entries = this.storage.listSourceEntries(app, source);
+    const payload = this.storage.getPayload(app, source);
+    return { app, source, entries, payload };
   }
 
-  private removeLocked(appRaw: unknown, sourceRaw: unknown): { app: string; source: string } {
+  delete(app: unknown, source: unknown): Promise<{ app: string; source: string }> {
+    return this.lock(() => this.deleteLocked(app, source));
+  }
+
+  private deleteLocked(appRaw: unknown, sourceRaw: unknown): { app: string; source: string } {
     const app = assertApp(appRaw);
     const source = assertSource(sourceRaw);
     this.storage.transaction(() => {

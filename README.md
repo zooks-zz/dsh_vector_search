@@ -12,7 +12,7 @@ DSH 宿主插件：**通用语义检索存储**。
 
 | 依赖 | 用途 | 不满足的后果 |
 |---|---|---|
-| **SiliconFlow embedding 服务**（`Qwen/Qwen3-Embedding-0.6B`） | 给 entry 和查询文本生成 1024 维向量 | 无法写入/检索（`vs_add`/`vs_search` 报错） |
+| **SiliconFlow embedding 服务**（`Qwen/Qwen3-Embedding-0.6B`） | 给 entry 和查询文本生成 1024 维向量 | 无法写入/检索（`vs_set`/`vs_search` 报错） |
 | **SiliconFlow reranker 服务**（`Qwen/Qwen3-Reranker-0.6B`） | 对向量召回结果精排 | 无法检索（`vs_search` 报错） |
 | **DSH credentials 存储**（`$DSH_HOME/.credentials.yaml`） | 安全存放 SiliconFlow API key | 无 key 无法调用上面两个服务 |
 | **Node.js ≥ 22.6**（内置 `node:sqlite` + TS 类型剥离） | 持久化（SQLite）+ 跑 TS 测试 | 插件无法运行 / 测试跑不了 |
@@ -24,7 +24,7 @@ DSH 宿主插件：**通用语义检索存储**。
 ```bash
 pnpm install   # 装依赖
 pnpm build     # tsc 编译 src/ → lib/
-pnpm test      # node --test 跑 test/ 下的 TS 用例（34 个）
+pnpm test      # node --test 跑 test/ 下的 TS 用例（36 个）
 ```
 
 > `lib/` 是编译产物，已 gitignore；clone 后需先 `pnpm build`，插件才能加载。
@@ -75,7 +75,7 @@ DB 位置固定 `$DSH_HOME/dsh-vector-search/store.db`，不开放配置。
 **① 存一条素材：**
 
 ```
-用 vs_add 工具，参数：app="materials"、source="素材001"、entries=["深夜赶稿的场景","加班压力下的坚持"]、payload={"title":"关于加班的小说素材"}
+用 vs_set 工具，参数：app="materials"、source="素材001"、entries=["深夜赶稿的场景","加班压力下的坚持"]、payload={"title":"关于加班的小说素材"}
 ```
 
 **② 语义检索：**
@@ -90,9 +90,9 @@ DB 位置固定 `$DSH_HOME/dsh-vector-search/store.db`，不开放配置。
 
 | 工具 | 说明 |
 |---|---|
-| `vs_add(app, source, entries[], payload?)` | 新建 source，逐条生成向量后一次性写入 |
-| `vs_update(app, source, entries[], payload?)` | 全量替换 entries + payload（payload 缺省清空） |
-| `vs_remove(app, source)` | 删除 source（级联；不存在幂等成功） |
+| `vs_set(app, source, entries[], payload?)` | 写入 source（upsert：不存在新建、存在全量替换；payload 缺省清空） |
+| `vs_get(app, source)` | 读取 source 完整记录（entries + payload）；不存在返回 null |
+| `vs_delete(app, source)` | 删除 source（级联；不存在幂等成功） |
 | `vs_search(app, query, limit?, top_k?)` | 语义检索（去重后按 rerank 分降序） |
 
 ## 目录结构
@@ -100,7 +100,7 @@ DB 位置固定 `$DSH_HOME/dsh-vector-search/store.db`，不开放配置。
 ```
 src/     TS 源码（config / vector / validate / storage / embedding / service / register / types + index）
 lib/     tsc 编译产物（.js + .d.ts，插件入口；gitignored）
-test/    TS 单测（34 用例，mock 外部依赖）
+test/    TS 单测（36 用例，mock 外部依赖）
 docs/    PRD + 决策记录
 locale/  中英文标题描述
 ```

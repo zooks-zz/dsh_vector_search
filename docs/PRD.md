@@ -61,28 +61,28 @@ CREATE TABLE source_payloads (
 ### 5.1 Service（default export，供其他插件进程内调用）
 
 ```
-add(app, source, entries, payload?)    → { app, source }
-update(app, source, entries, payload?) → { app, source }
-remove(app, source)                    → { app, source }
+set(app, source, entries, payload?)    → { app, source }
+get(app, source)                       → SourceRecord | null
+delete(app, source)                    → { app, source }
 search(app, query, limit?, top_k?)     → SearchResult[]
 ```
 
 ### 5.2 Agent 工具（Service 的薄封装）
 
-前缀 `vs_`（提案，可改）：
+前缀 `vs_`：
 
 | 工具 | 参数 | 说明 |
 |---|---|---|
-| `vs_add` | `app, source, entries[], payload?` | 新建 source |
-| `vs_update` | `app, source, entries[], payload?` | 全量替换 source 的 entries + payload |
-| `vs_remove` | `app, source` | 删除 source（级联两表） |
+| `vs_set` | `app, source, entries[], payload?` | 写入 source（upsert：不存在新建、存在全量替换） |
+| `vs_get` | `app, source` | 读取 source 完整记录（entries + payload）；不存在返回 null |
+| `vs_delete` | `app, source` | 删除 source（级联两表；幂等） |
 | `vs_search` | `app, query, limit?, top_k?` | 语义检索 |
 
 ### 5.3 写接口语义
 
-- `add`：`(app, source)` 已存在 → 报错。`entries` 非空、每项 trim 后非空。逐条生成向量，**全部成功后一次性写入**；任一条 embedding 失败 → 整次拒绝、不写入任何数据。`payload` 可选。
-- `update`：`(app, source)` 不存在 → 报错。**全量替换**——用新的 `entries` 替换旧的、重嵌全部 entry。`payload` 缺省 = **清空**；给值 = 覆盖。
-- `remove`：级联删除两表；`(app, source)` 不存在 → **幂等成功（无操作）**，不报错。
+- `set`：幂等 upsert。`(app, source)` 不存在 → 新建；存在 → **全量替换** entries 与 payload。`entries` 非空、每项 trim 后非空；逐条生成向量、重嵌全部 entry，**全部成功后一次性写入**；任一条 embedding 失败 → 整次拒绝、不写入任何数据。`payload` 缺省 = **清空**；给值 = 覆盖。
+- `get`：返回 `SourceRecord`；`(app, source)` 不存在 → 返回 **null**（幂等，不报错）。entries 按写入顺序返回；不返回内部向量。
+- `delete`：级联删除两表；`(app, source)` 不存在 → **幂等成功（无操作）**，不报错。
 
 ### 5.4 search 流程
 
@@ -105,6 +105,19 @@ interface SearchResult {
 ```
 
 - 只返回 `rerank_score`，不返回向量余弦分数（调试信息，不进结果）。
+
+### 5.6 SourceRecord
+
+```ts
+interface SourceRecord {
+  app: string;             // 命名空间
+  source: string;          // 记录标识
+  entries: string[];       // 该 source 的全部入口（按写入顺序）
+  payload: object | null;  // source 的附加数据；无则 null
+}
+```
+
+`get` 返回 `SourceRecord | null`（source 不存在时为 null）。
 
 ## 6. 外部服务
 
@@ -147,8 +160,6 @@ interface SearchResult {
 | 错误 | 触发 |
 |---|---|
 | `参数非法` | app / source / entry 为空或超长；payload 非合法 JSON |
-| `source 已存在` | add 时 (app, source) 已存在 |
-| `source 不存在` | update 时 (app, source) 不存在 |
 | `库为空` | search 时 app 下无任何 entry |
 | `未配置 API key` | credentials 中无 key |
 | `embedding 服务不可用` | embedding 请求失败 / 超时 |
@@ -159,7 +170,7 @@ interface SearchResult {
 ## 9. 并发与一致性
 
 - SQLite 单连接，写操作串行化（写队列）。
-- 每个写操作（add / update / remove）是原子事务。
+- 每个写操作（set / delete）是原子事务。
 - embed → 写库在同一逻辑单元内：向量全部生成成功才落库。
 
 ## 10. 测试策略
@@ -170,4 +181,4 @@ interface SearchResult {
 
 ## 11. 非目标（v1 明确不做）
 
-batch 批量嵌入、并发嵌入、embedding 缓存（text→vector）、内存向量缓存、tag 机制、ANN、min_score 阈值、vector_score 返回、stats、list、空 source、`get(source)` 只读、app 注册表、独立对外 HTTP 服务。详见 [决策记录](decisions.md)。
+batch 批量嵌入、并发嵌入、embedding 缓存（text→vector）、内存向量缓存、tag 机制、ANN、min_score 阈值、vector_score 返回、stats、list、空 source、app 注册表、独立对外 HTTP 服务。详见 [决策记录](decisions.md)。

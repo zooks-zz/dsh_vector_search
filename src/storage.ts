@@ -27,6 +27,7 @@ export class Storage {
   private stmtInsertEntry!: Statement;
   private stmtSourceExists!: Statement;
   private stmtLoadEntries!: Statement;
+  private stmtListSourceEntries!: Statement;
   private stmtDeleteEntries!: Statement;
   private stmtUpsertPayload!: Statement;
   private stmtDeletePayload!: Statement;
@@ -69,6 +70,9 @@ export class Storage {
     this.stmtLoadEntries = this.db.prepare(
       "SELECT source, entry, vector FROM source_entries WHERE app = ?"
     );
+    this.stmtListSourceEntries = this.db.prepare(
+      "SELECT entry FROM source_entries WHERE app = ? AND source = ? ORDER BY id"
+    );
     this.stmtDeleteEntries = this.db.prepare(
       "DELETE FROM source_entries WHERE app = ? AND source = ?"
     );
@@ -107,6 +111,11 @@ export class Storage {
   loadEntries(app: string): EntryRow[] {
     const rows = this.stmtLoadEntries.all(app) as unknown as EntryRowRaw[];
     return rows.map((r) => ({ source: r.source, entry: r.entry, vector: bytesToF32(r.vector) }));
+  }
+
+  listSourceEntries(app: string, source: string): string[] {
+    const rows = this.stmtListSourceEntries.all(app, source) as unknown as { entry: string }[];
+    return rows.map((r) => r.entry);
   }
 
   deleteEntries(app: string, source: string): void {

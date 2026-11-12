@@ -27,9 +27,9 @@ function setup(): { svc: VectorSearchService; storage: Storage; dir: string } {
   return { svc, storage, dir };
 }
 
-test("add 后能 search 到，payload 带回", async () => {
+test("set 后能 search 到，payload 带回", async () => {
   const { svc, storage, dir } = setup();
-  await svc.add("materials", "m1", ["深夜赶稿"], { title: "素材一" });
+  await svc.set("materials", "m1", ["深夜赶稿"], { title: "素材一" });
   const { results } = await svc.search("materials", "查询词");
   assert.equal(results.length, 1);
   assert.equal(results[0].source, "m1");
@@ -40,38 +40,52 @@ test("add 后能 search 到，payload 带回", async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("add 重复 source 报错", async () => {
+test("set 对已存在 source 全量替换（upsert），payload 缺省清空", async () => {
   const { svc, storage, dir } = setup();
-  await svc.add("app", "s", ["a"]);
-  await assert.rejects(() => svc.add("app", "s", ["b"]), /已存在/);
-  storage.close();
-  rmSync(dir, { recursive: true, force: true });
-});
-
-test("update 全量替换 + payload 缺省清空", async () => {
-  const { svc, storage, dir } = setup();
-  await svc.add("app", "s", ["旧入口"], { keep: true });
-  await svc.update("app", "s", ["新入口"]); // 不带 payload → 清空
+  await svc.set("app", "s", ["旧入口"], { keep: true });
+  await svc.set("app", "s", ["新入口"]); // 不带 payload → 清空
+  const got = svc.get("app", "s");
+  assert.deepEqual(got?.entries, ["新入口"]);
+  assert.equal(got?.payload, null);
   const { results } = await svc.search("app", "查询词");
   assert.equal(results.length, 1);
   assert.equal(results[0].entry, "新入口");
-  assert.equal(results[0].payload, undefined); // payload 已清空，键不存在
   storage.close();
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("update 不存在的 source 报错", async () => {
+test("set 对不存在的 source 直接新建", async () => {
   const { svc, storage, dir } = setup();
-  await assert.rejects(() => svc.update("app", "nope", ["x"]), /不存在/);
+  await svc.set("app", "s", ["x"], { a: 1 });
+  const got = svc.get("app", "s");
+  assert.deepEqual(got?.entries, ["x"]);
+  assert.deepEqual(got?.payload, { a: 1 });
   storage.close();
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("remove 幂等", async () => {
+test("get 返回完整记录（entries 按写入顺序 + payload）", async () => {
   const { svc, storage, dir } = setup();
-  await svc.add("app", "s", ["a"]);
-  await svc.remove("app", "s");
-  await svc.remove("app", "s"); // 再次删不报错
+  await svc.set("app", "s", ["入口一", "入口二"], { title: "t" });
+  const got = svc.get("app", "s");
+  assert.deepEqual(got, { app: "app", source: "s", entries: ["入口一", "入口二"], payload: { title: "t" } });
+  storage.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("get 不存在的 source 返回 null", () => {
+  const { svc, storage, dir } = setup();
+  assert.equal(svc.get("app", "nope"), null);
+  storage.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("delete 幂等", async () => {
+  const { svc, storage, dir } = setup();
+  await svc.set("app", "s", ["a"]);
+  await svc.delete("app", "s");
+  await svc.delete("app", "s"); // 再次删不报错
+  assert.equal(svc.get("app", "s"), null);
   await assert.rejects(() => svc.search("app", "查询词"), /库为空/);
   storage.close();
   rmSync(dir, { recursive: true, force: true });
@@ -79,7 +93,7 @@ test("remove 幂等", async () => {
 
 test("search 按 source 去重、只留最高 rerank 分", async () => {
   const { svc, storage, dir } = setup();
-  await svc.add("app", "s1", ["深夜赶稿", "加班压力"]); // 同一 source 两个 entry
+  await svc.set("app", "s1", ["深夜赶稿", "加班压力"]); // 同一 source 两个 entry
   const { results } = await svc.search("app", "查询词");
   assert.equal(results.length, 1); // 去重后只剩 s1 一条
   assert.equal(results[0].source, "s1");
@@ -89,7 +103,7 @@ test("search 按 source 去重、只留最高 rerank 分", async () => {
 
 test("search 结果受 limit 约束", async () => {
   const { svc, storage, dir } = setup();
-  for (let i = 0; i < 5; i++) await svc.add("app", `s${i}`, [`入口${i}`]);
+  for (let i = 0; i < 5; i++) await svc.set("app", `s${i}`, [`入口${i}`]);
   const { results } = await svc.search("app", "查询词", 3);
   assert.equal(results.length, 3);
   storage.close();
@@ -98,7 +112,7 @@ test("search 结果受 limit 约束", async () => {
 
 test("空 query 返回空列表", async () => {
   const { svc, storage, dir } = setup();
-  await svc.add("app", "s", ["a"]);
+  await svc.set("app", "s", ["a"]);
   const { results } = await svc.search("app", "   ");
   assert.deepEqual(results, []);
   storage.close();
@@ -114,7 +128,7 @@ test("空库报错", async () => {
 
 test("app 之间数据隔离", async () => {
   const { svc, storage, dir } = setup();
-  await svc.add("materials", "m1", ["素材入口"]);
+  await svc.set("materials", "m1", ["素材入口"]);
   await assert.rejects(() => svc.search("wrongbook", "查询词"), /库为空/); // 另一个 app 是空的
   storage.close();
   rmSync(dir, { recursive: true, force: true });
