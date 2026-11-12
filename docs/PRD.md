@@ -124,16 +124,23 @@ interface SearchResult {
 | `dimensions` | `1024` | 按接口文档设，写入时校验向量长度 |
 | `recall_top_k` | `30` | 可被 `search(top_k)` 覆盖 |
 | `result_limit` | `10` | 可被 `search(limit)` 覆盖 |
-| `db_path` | `$DSH_HOME/dsh-vector-search/store.db` | 可覆盖 |
 
-- **API key 不在此表**：存 `credentials` 服务，通过 `authorization` 流一次性配置（见 7.1）。
+- **API key 不在此表**：存 `credentials` 的 ref（`siliconflow_api_key`），手动编辑 `$DSH_HOME/.credentials.yaml`（见 7.1）。
+- **DB 位置**：固定 `$DSH_HOME/dsh-vector-search/store.db`（不在 config 中）。
 - 校验常量（非配置，硬编码）：`app` / `source` / `entry` 长度上限（建议值：app ≤ 64、source ≤ 512、entry ≤ 512，具体实现时定）。
 
-### 7.1 API key 配置（DSH 常规做法）
+### 7.1 API key 配置
 
-- **读取**：`credentials.readRecord(key)` → `{ kind: 'api-key', key }`。
-- **一次性配置**：插件 `inject: ['authorization', 'credentials']`，apply 里 `authorization.registerFlow(...)` 注册「粘贴 API Key」流；首次需要 key 而缺失时 `authorization.begin({ key, ... })`，harness 弹交互、用户粘贴、流内 `commit({ kind: 'api-key', key })` 落库。
-- **不**写 config、不写环境变量、不把 key 当工具参数（避免进聊天历史）。
+- **读取**：`credentials.resolve("siliconflow_api_key")` → `{ value }`。
+- **配置**：手动编辑 `$DSH_HOME/.credentials.yaml`：
+
+  ```yaml
+  version: 1
+  refs:
+    siliconflow_api_key: sk-xxxx
+  ```
+
+- **不**写 config、不写环境变量、不把 key 当工具参数（避免 key 进会话/聊天历史）。
 
 ## 8. 错误码
 

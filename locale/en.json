@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Vector search",
+    "description": "Generic semantic search store: persist sources with searchable entries and retrieve them by natural-language query."
+  }
+}

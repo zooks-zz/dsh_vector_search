@@ -1,0 +1,15 @@
+# 依赖（node_modules 与 pnpm 本地存储，体积巨大且可重装，绝不能提交）
+node_modules/
+.pnpm-store/
+
+# 构建产物（若未来迁移到 TypeScript）
+lib/
+dist/
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# 编辑器 / IDE
+.vscode/
+.idea/

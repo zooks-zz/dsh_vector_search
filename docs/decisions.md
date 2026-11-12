@@ -2,12 +2,12 @@
 
 本文件是 dsh-vector-search 设计的**权威决策记录**。每条标状态：✅ 已定 / ❌ 否决 / ⏳ 推迟（附理由或触发条件）。
 
-## ✅ 已定
+## ✅ 已定（设计）
 
 - **数据模型**：`app`（命名空间）1—N `source` 1—N `entry`，`source` 0—1 `payload`；`(app, source, entry)` 唯一。
 - **表结构**：两张（`source_entries`、`source_payloads`），无 `apps` / `sources` / `tags` 表。
 - **存储**：`node:sqlite`（Node 内置，无原生依赖）；向量存 BLOB(float32)、写入时 L2 归一化。
-- **DB 位置**：全局共享 `$DSH_HOME/dsh-vector-search/store.db`（跨 profile、跨项目），`db_path` 可覆盖。用户已将 `$DSH_HOME` 设为系统变量、指向独立目录。
+- **DB 位置**：全局共享 `$DSH_HOME/dsh-vector-search/store.db`（跨 profile、跨项目）。用户已将 `$DSH_HOME` 设为系统变量、指向独立目录。
 - **向量召回**：纯 JS 余弦相似度；每次 search 从 SQLite 现读该 app 的向量，**不维护内存缓存**；不用 SQLite 向量扩展、不做 ANN。
 - **接口**：`add / update / remove / search` 四操作，全部显式带 `app`（不自动识别调用方身份）。
 - **语义**：`add` 重复 source → 报错；`update` 全量替换、payload 缺省 = 清空；`remove` 级联删两表、不存在则幂等成功。
@@ -15,11 +15,19 @@
 - **结果**：`{source, entry, payload, rerank_score}`，score ∈ [0,1]，只返回 rerank 分数。
 - **失败即报错**：外部服务挂 → 整体报错并指明环节；空语料报错；空 query（trim 后）返回空列表。
 - **输入校验**：`query` / `entry` 先 trim 再判空（纯空白视作空）。
-- **API key**：存 `credentials` 服务，`authorization` 流引导一次性配置（不写 config、不写环境变量、不当工具参数）。
 - **外部服务**：embedding / rerank 地址独立配置（互不依赖，可单独迁移）。
 - **维度**：`dimensions` 配置（默认 1024）；embedding 请求显式带 `dimensions`，响应校验维度长度；范数为 0 / 含 NaN → 拒绝。
-- **暴露方式**：Service（default export）+ `vs_*` 工具薄封装。
 - **app 唯一性**：命名约定（分发时用包名前缀），不做注册表。
+
+## ✅ 已定（实现）
+
+- **实现语言**：TypeScript（`src/` → tsc 编译到 `lib/`，含 `.d.ts`）。
+- **配置走 schemastery（正统）**：`export const Config = z.object({...})`，字段带 `.default()`；由设置界面 + config-editor 管理。字段 7 个：`embedding_base_url` / `rerank_base_url` / `embedding_model` / `rerank_model` / `dimensions` / `recall_top_k` / `result_limit`（**无 db_path、无 api_key**）。
+- **API key 走 credentials ref + YAML 手动配置**：存 `credentials` 的 ref `siliconflow_api_key`；读取用 `credentials.resolve(ref)`；配置方式**仅**手动编辑 `$DSH_HOME/.credentials.yaml`。不写 config、不写环境变量、不把 key 当工具参数（避免 key 进会话）。
+- **import DSH 自己的包是正当的**：schemastery 是 DSH 框架本体，import 理所应当；靠声明依赖解决 asar 解析（schemastery 的传递依赖 cosmokit / @standard-schema/spec 也需显式声明，因 pnpm 隔离布局 + Windows junction 解析问题）。
+- **代码布局**：`src/` 按功能切分——`config.ts` / `vector.ts` / `validate.ts` / `storage.ts` / `embedding.ts` / `service.ts`（业务逻辑 + 结果格式化）/ `register.ts`（工具注册）/ `types.ts`（DSH 边界类型）。入口 `index.ts`（Config + apply + inject）。
+- **工具命名**：前缀 `vs_`，四个工具 `vs_add / vs_update / vs_remove / vs_search`。
+- **单元测试**：`test/` 目录 TS 单测 + Node 内置 `node:test`（Node 24 原生类型剥离，**无需 tsx**）；mock 外部依赖（`Embedder` 接口 + 注入 mock fetch）；命令 `node --test --test-isolation=none`。
 
 ## ❌ 否决（决定不做，附理由）
 
@@ -33,7 +41,11 @@
 | `get(source)` 只读 | 非核心职责；add 已对重复报错 |
 | 自动识别调用方身份 | fiber 异步不可靠、隐式难调试、agent 直调无解 |
 | payload 放正文 / 全文 | 附加能力不替代原系统，插件不管 payload 内容 |
-| API key 写 config / 环境变量 | 非 DSH 常规；应走 credentials + authorization |
+| API key 写 config / 环境变量 | 应走 credentials ref |
+| API key 走 authorization 流（record） | 需客户端 UI 触发，纯 Host 插件断链；ref 更简 |
+| **`vs_configure` 工具（key 当工具参数）** | **key 进会话/聊天历史，致命安全漏洞** |
+| config.json 作「活配置」 | 被 schemastery Config 取代 |
+| 把 cordis / schemastery 当「第三方依赖」回避 | 它们是 DSH 框架本体，import 理所应当 |
 
 ## ⏳ 推迟（v1 不做，附触发条件）
 
@@ -49,8 +61,13 @@
 | 结果分组展示「全部命中 entry」 | 消费方明确需要看到多情境命中时 |
 | 更换 embedding 模型 / 全量重嵌迁移 | 切换模型时（必然触发全量重嵌） |
 | 独立对外 HTTP 服务 | 出现非 DSH 的消费者时 |
+| Service 暴露（cordis `Service` 类） | 素材库/错题本等插件需要「inject 我们」做插件间调用时 |
+| 客户端授权 UI（settings.section 面板） | 需要「点界面配 key」而非手改 YAML 时 |
 
-## 🔧 实现第 0 步待验证
+## 🔧 环境 / 运维备忘
 
-- `node:sqlite` 在目标 Electron 运行时是否可用；不可用则退回「JSON 文件 + 原子写(tmp+rename) + 单写锁」，接口不变。
-- `$DSH_HOME` 实际取值（实现时读取确认）。
+- `node:sqlite` 在目标 Electron 运行时可用（已激活验证）。
+- 工作区 `D:\dev\dsh-vector-search` 曾缺 WRITE_OWNER 导致沙箱无法跑 shell；已用诊断脚本补全当前用户完全控制权（备份在 `D:\dev\.acl-recovery\`）。
+- 沙箱默认模式对工作区**只读**；跑 shell 写/删文件需 `danger-full-access` 一次性授权。
+- 沙箱禁「管道 spawn 子进程」，跑测试须加 `--test-isolation=none`。
+- 跑测试：`node --test --test-isolation=none`（Node 24 原生剥离 TS 类型，无需 tsx；tsx 曾试装失败且弄坏 node_modules，已弃用）。
